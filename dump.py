@@ -48,8 +48,8 @@ def download(url, download_path, album=None):
     with session.get(
         url,
         headers={
-            "Referer": "https://www.erome.com/a/N62TCNFH",
-            "Origin": f"https://{hostname}" if album is None else album,
+            "Referer": f"https://{hostname}" if album is None else album,
+            "Origin": f"https://{hostname}",
             "User-Agent": "Mozila/5.0",
         },
         stream=True,
