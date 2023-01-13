@@ -25,7 +25,7 @@ def collect_links(album_url):
     images = [
         image["data-src"] for image in soup.find_all("img", {"class": "img-back"})
     ]
-    urls = [*videos, *images]
+    urls = list(set([*videos, *images]))
     download_path = get_final_path(title)
     for file_url in urls:
         download(file_url, download_path, album_url)
