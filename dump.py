@@ -5,6 +5,7 @@ from bs4 import BeautifulSoup
 from urllib.parse import urlparse
 import os
 import tldextract
+from progress.bar import ChargingBar
 
 session = requests.Session()
 
@@ -64,12 +65,20 @@ def download(url, download_path, album=None, existing_files=[]):
     ) as r:
         if r.ok:
             with open(os.path.join(download_path, file_name), "wb") as f:
-                for chunk in r.iter_content(chunk_size=1024):
-                    f.write(chunk)
+                writer(f, r, file_name)
         else:
             print(r)
             print(f'[ERROR] Download of  "{url}" failed')
             return None
+
+
+def writer(file, content, filename):
+    with ChargingBar(
+        f"Download {filename}...", max=len(content.content) // 1024
+    ) as bar:
+        for chunk in content.iter_content(chunk_size=1024):
+            file.write(chunk)
+            bar.next()
 
 
 if __name__ == "__main__":
