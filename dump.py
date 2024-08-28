@@ -5,6 +5,7 @@ from bs4 import BeautifulSoup
 from urllib.parse import urlparse
 import os
 import tldextract
+import re
 
 session = requests.Session()
 
@@ -20,6 +21,7 @@ def collect_links(album_url):
 
     soup = BeautifulSoup(r.content, "html.parser")
     title = soup.find("meta", property="og:title")["content"]
+    title = sanitize_path_string(title)
     videos = [video_source["src"] for video_source in soup.find_all("source")]
     images = [
         image["data-src"] for image in soup.find_all("img", {"class": "img-back"})
@@ -71,9 +73,15 @@ def download(url, download_path, album=None, existing_files=[]):
             print(f'[ERROR] Download of  "{url}" failed')
             return None
 
+def sanitize_path_string(input_string):
+    invalid_chars_pattern = r'[<>:"/\\|?*.\x00-\x1F]'
+    sanitized_string = re.sub(invalid_chars_pattern, '_', input_string)
+    return sanitized_string
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(sys.argv[1:])
     parser.add_argument("-u", help="url to download", type=str, required=True)
     args = parser.parse_args()
     collect_links(args.u)
+
+
