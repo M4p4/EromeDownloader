@@ -12,6 +12,7 @@ session = requests.Session()
 # Chars not valid to windows folder creation
 UNVALID_CHARS = [r"\\", r"\/", r"\?", r"\:", r"\*", r"\<", r"\"", r"\>", r"\|"]
 PATTERN = "[(" + "".join(UNVALID_CHARS) + ")]"
+MAX_ATTEMPTS = 5
 
 
 def collect_links(album_url):
@@ -57,32 +58,48 @@ def download(url, download_path, album=None, existing_files=[]):
     file_name = os.path.basename(parsed_url.path)
     extracted = tldextract.extract(url)
     hostname = "{}.{}".format(extracted.domain, extracted.suffix)
-    with session.get(
-        url,
-        headers={
-            "Referer": f"https://{hostname}" if album is None else album,
-            "Origin": f"https://{hostname}",
-            "User-Agent": "Mozila/5.0",
-        },
-        stream=True,
-    ) as r:
-        if r.ok:
-            with open(os.path.join(download_path, file_name), "wb") as f, tqdm(
-                desc=file_name,
-                total=int(r.headers.get("Content-Length", 0)) // 1024,
-                unit="Kb",
-                unit_scale=True,
-                leave=False,
-                position=1,
-            ) as bar:
-                for chunk in r.iter_content(chunk_size=1024):
-                    if chunk:
-                        f.write(chunk)
-                        bar.update(len(chunk) // 1024)
-        else:
-            print(r)
-            print(f'[ERROR] Download of  "{url}" failed')
-            return None
+
+    attempt = 0
+    while attempt < MAX_ATTEMPTS:
+        with session.get(
+            url,
+            headers={
+                "Referer": f"https://{hostname}" if album is None else album,
+                "Origin": f"https://{hostname}",
+                "User-Agent": "Mozila/5.0",
+            },
+            stream=True,
+        ) as r:
+            if r.ok:
+                total_size_in_bytes = int(r.headers.get("Content-Length", 0))
+                block_size = 1024
+
+                with open(os.path.join(download_path, file_name), "wb") as f, tqdm(
+                    desc=file_name,
+                    total=total_size_in_bytes // block_size,
+                    unit="Kb",
+                    unit_scale=True,
+                    leave=False,
+                    position=1,
+                ) as bar:
+                    downloaded_size = 0
+                    for chunk in r.iter_content(chunk_size=block_size):
+                        if chunk:
+                            f.write(chunk)
+                            bar.update(len(chunk) // block_size)
+                            downloaded_size += len(chunk)
+
+                if downloaded_size == total_size_in_bytes:
+                    break
+                else:
+                    attempt += 1
+                    continue
+            else:
+                print(r)
+                print(f'[ERROR] Download of  "{url}" failed')
+                return None
+    else:
+        print(f"[ERROR] Failed to download '{file_name}' after {MAX_ATTEMPTS} retries.")
 
 
 if __name__ == "__main__":
