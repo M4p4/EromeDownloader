@@ -35,9 +35,11 @@ def collect_links(album_url: str) -> int:
 
     return len(urls)
 
+
 def clean_title(title: str) -> str:
     illegal_chars = r'[\\/:*?"<>|]'
     return re.sub(illegal_chars, '_', title)
+
 
 def get_final_path(title: str) -> str:
     final_path = os.path.join("downloads", title)
