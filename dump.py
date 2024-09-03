@@ -54,7 +54,7 @@ def get_files_in_dir(directory: str) -> list[str]:
     ]
 
 
-def download(url: str, download_path: str, album: str | None, existing_files: list[str]) -> None:
+def download(url: str, download_path: str, album: str, existing_files: list[str]) -> None:
     parsed_url = urlparse(url)
     file_name = os.path.basename(parsed_url.path)
     if file_name in existing_files:
