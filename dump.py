@@ -5,9 +5,13 @@ from bs4 import BeautifulSoup
 from urllib.parse import urlparse
 import os
 import tldextract
-from progress.bar import ChargingBar
+from tqdm import tqdm
+import re
 
 session = requests.Session()
+# Chars not valid to windows folder creation
+UNVALID_CHARS = [r"\\", r"\/", r"\?", r"\:", r"\*", r"\<", r"\"", r"\>", r"\|"]
+PATTERN = "[(" + "".join(UNVALID_CHARS) + ")]"
 
 
 def collect_links(album_url):
@@ -26,17 +30,20 @@ def collect_links(album_url):
         image["data-src"] for image in soup.find_all("img", {"class": "img-back"})
     ]
     urls = list(set([*videos, *images]))
-    download_path = get_final_path(title)
+    download_path, folder_name = get_final_path(title)
     existing_files = get_files_in_dir(download_path)
-    for file_url in urls:
-        download(file_url, download_path, album_url, existing_files)
+    with tqdm(desc=folder_name, total=len(urls), leave=True, position=0) as dbar:
+        for file_url in urls:
+            download(file_url, download_path, album_url, existing_files)
+            dbar.update()
 
 
 def get_final_path(title):
-    final_path = os.path.join("downloads", title)
+    folder_name = re.sub(PATTERN, "_", title)
+    final_path = os.path.join("downloads", folder_name)
     if not os.path.isdir(final_path):
         os.makedirs(final_path)
-    return final_path
+    return final_path, folder_name
 
 
 def get_files_in_dir(directory):
@@ -48,10 +55,6 @@ def get_files_in_dir(directory):
 def download(url, download_path, album=None, existing_files=[]):
     parsed_url = urlparse(url)
     file_name = os.path.basename(parsed_url.path)
-    if file_name in existing_files:
-        print(f'[#] Skipping "{url}" [already downloaded]')
-        return
-    print(f'[+] Downloading "{url}"')
     extracted = tldextract.extract(url)
     hostname = "{}.{}".format(extracted.domain, extracted.suffix)
     with session.get(
@@ -64,25 +67,33 @@ def download(url, download_path, album=None, existing_files=[]):
         stream=True,
     ) as r:
         if r.ok:
-            with open(os.path.join(download_path, file_name), "wb") as f:
-                writer(f, r, file_name)
+            with open(os.path.join(download_path, file_name), "wb") as f, tqdm(
+                desc=file_name,
+                total=int(r.headers.get("Content-Length", 0)) // 1024,
+                unit="Kb",
+                unit_scale=True,
+                leave=False,
+                position=1,
+            ) as bar:
+                for chunk in r.iter_content(chunk_size=1024):
+                    if chunk:
+                        f.write(chunk)
+                        bar.update(len(chunk) // 1024)
         else:
             print(r)
             print(f'[ERROR] Download of  "{url}" failed')
             return None
 
 
-def writer(file, content, filename):
-    with ChargingBar(
-        f"Download {filename}...", max=len(content.content) // 1024
-    ) as bar:
-        for chunk in content.iter_content(chunk_size=1024):
-            file.write(chunk)
-            bar.next()
-
-
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(sys.argv[1:])
-    parser.add_argument("-u", help="url to download", type=str, required=True)
+    group = parser.add_mutually_exclusive_group(required=True)
+    group.add_argument("-u", help="url to download", type=str)
+    group.add_argument("-f", help="file with links to download", type=str)
     args = parser.parse_args()
-    collect_links(args.u)
+    if args.u:
+        collect_links(args.u)
+    elif args.f:
+        with open(args.f) as reader:
+            for line in reader.readlines():
+                collect_links(line.strip())
