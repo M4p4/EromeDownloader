@@ -36,9 +36,11 @@ def collect_links(album_url: str) -> int:
     return len(urls)
 
 
-def clean_title(title: str) -> str:
+def clean_title(title: str, default_title="temp") -> str:
     illegal_chars = r'[\\/:*?"<>|]'
-    return re.sub(illegal_chars, '_', title)
+    title = re.sub(illegal_chars, '_', title)
+    title = title.strip('. ')
+    return title if title else default_title
 
 
 def get_final_path(title: str) -> str:
