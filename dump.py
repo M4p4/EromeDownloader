@@ -79,7 +79,7 @@ def get_files_in_dir(directory: str) -> list[str]:
 
 
 def download(url: str, download_path: str, album: str, existing_files: list[str]) -> None:
-    file_name, file_path, headers = download_setup(url, download_path, album, existing_files)
+    file_name, file_path, headers = download_setup(url, download_path, album)
     if file_name in existing_files:
         print(f'[#] Skipping "{url}" [already downloaded]')
         return
