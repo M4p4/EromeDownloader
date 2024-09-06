@@ -15,11 +15,12 @@ CHUNK_SIZE = 1024
 
 session = requests.Session()
 incomplete_downloads = []
+can_skip_check = []
 
 session.headers.update({"User-Agent": USER_AGENT})
 
 
-def collect_links(album_url: str, should_redownload_incomplete=False) -> int:
+def collect_links(album_url: str, should_redownload_incomplete=False, is_first_run=True) -> int:
     validate_url(album_url)
     soup = fetch_album_page(album_url)
     title = extract_title(soup)
@@ -30,14 +31,14 @@ def collect_links(album_url: str, should_redownload_incomplete=False) -> int:
     for file_url in urls:
         if should_redownload_incomplete:
             download_with_incomplete_check(
-                file_url, download_path, album_url, existing_files
+                file_url, download_path, album_url, existing_files,is_first_run
             )
         else:
             download(file_url, download_path, album_url, existing_files)
 
     # Retry incomplete downloads
     if incomplete_downloads:
-        return collect_links(album_url, should_redownload_incomplete=True)
+        return collect_links(album_url, should_redownload_incomplete=True, is_first_run=False)
 
     return len(urls)
 
@@ -124,9 +125,11 @@ def download(
 
 
 def download_with_incomplete_check(
-    url: str, download_path: str, album: str, existing_files: list[str]
+    url: str, download_path: str, album: str, existing_files: list[str],is_first_run: bool
 ) -> None:
     file_name, file_path, headers = download_setup(url, download_path, album)
+    if is_first_run == False and file_name in can_skip_check:
+        print(f'[\u2713] "{file_name}" already downloaded, skipping')
     existing_file_size = 0
     total_size_in_bytes = 0
     if file_name in existing_files:
@@ -146,6 +149,7 @@ def download_with_incomplete_check(
                 or abs(total_size_in_bytes - existing_file_size) < CHUNK_SIZE * 100
             ):
                     print(f'[\u2713] "{file_name}" already downloaded, skipping')
+                    can_skip_check.append(file_name)
                     return
 
 
@@ -174,6 +178,7 @@ def download_with_incomplete_check(
                 else:
                     if file_name in incomplete_downloads:
                         incomplete_downloads.remove(file_name)
+                    can_skip_check.append(file_name)
                 return None
 
         else:
