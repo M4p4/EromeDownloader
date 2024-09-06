@@ -10,14 +10,16 @@ from bs4 import BeautifulSoup
 from tqdm import tqdm
 
 session = requests.Session()
+USER_AGENT = "Mozilla/5.0"
+HOST = "www.erome.com"
 
 
 def collect_links(album_url: str) -> int:
     parsed_url = urlparse(album_url)
-    if parsed_url.hostname != "www.erome.com":
-        raise Exception(f"Host must be www.erome.com")
+    if parsed_url.hostname != HOST:
+        raise Exception(f"Host must be {HOST}")
 
-    r = session.get(album_url, headers={"User-Agent": "Mozilla/5.0"})
+    r = session.get(album_url, headers={"User-Agent": USER_AGENT})
     if r.status_code != 200:
         raise Exception(f"HTTP error {r.status_code}")
 
@@ -27,7 +29,7 @@ def collect_links(album_url: str) -> int:
     images = [
         image["data-src"] for image in soup.find_all("img", {"class": "img-back"})
     ]
-    urls = list(set([*videos, *images]))
+    urls = list({*videos, *images})
     download_path = get_final_path(title)
     existing_files = get_files_in_dir(download_path)
     for file_url in urls:
@@ -38,8 +40,8 @@ def collect_links(album_url: str) -> int:
 
 def clean_title(title: str, default_title="temp") -> str:
     illegal_chars = r'[\\/:*?"<>|]'
-    title = re.sub(illegal_chars, '_', title)
-    title = title.strip('. ')
+    title = re.sub(illegal_chars, "_", title)
+    title = title.strip(". ")
     return title if title else default_title
 
 
@@ -56,36 +58,70 @@ def get_files_in_dir(directory: str) -> list[str]:
     ]
 
 
-def download(url: str, download_path: str, album: str, existing_files: list[str]) -> None:
+def download(
+    url: str,
+    download_path: str,
+    album: str,
+    existing_files: list[str],
+    max_retries: int = 3,
+):
     parsed_url = urlparse(url)
     file_name = os.path.basename(parsed_url.path)
     if file_name in existing_files:
         print(f'[#] Skipping "{url}" [already downloaded]')
         return
+
     print(f'[+] Downloading "{url}"')
     extracted = tldextract.extract(url)
     hostname = "{}.{}".format(extracted.domain, extracted.suffix)
-    with session.get(
-            url,
-            headers={
-                "Referer": f"https://{hostname}" if album is None else album,
-                "Origin": f"https://{hostname}",
-                "User-Agent": "Mozila/5.0",
-            },
-            stream=True,
-    ) as r:
-        if r.ok:
-            total_size_in_bytes = int(r.headers.get("content-length", 0))
-            progress_bar = tqdm(total=total_size_in_bytes, unit="iB", unit_scale=True)
-            with open(os.path.join(download_path, file_name), "wb") as f:
-                for chunk in r.iter_content(chunk_size=1024):
-                    progress_bar.update(len(chunk))
-                    f.write(chunk)
-            progress_bar.close()
-        else:
-            print(r)
-            print(f'[ERROR] Download of  "{url}" failed')
-            return None
+    headers = {
+        "Referer": album,
+        "Origin": f"https://{hostname}",
+        "User-Agent": USER_AGENT,
+    }
+
+    progress_bar = None
+    for attempt in range(max_retries):
+        try:
+            with session.get(url, headers=headers, stream=True) as r:
+                r.raise_for_status()
+                total_size_in_bytes = int(r.headers.get("content-length", 0))
+                progress_bar = tqdm(
+                    total=total_size_in_bytes, unit="B", unit_scale=True
+                )
+                file_path = os.path.join(download_path, file_name)
+                with open(file_path, "wb") as f:
+                    for chunk in r.iter_content(chunk_size=8192):
+                        progress_bar.update(len(chunk))
+                        f.write(chunk)
+                progress_bar.close()
+
+                if os.path.getsize(file_path) != total_size_in_bytes:
+                    raise ValueError(
+                        "Downloaded file size does not match expected size"
+                    )
+                return
+
+        except requests.exceptions.RequestException as e:
+            print(
+                f'[ERROR] HTTP Request failed on attempt {attempt + 1} for "{url}": {str(e)}'
+            )
+        except ValueError as e:
+            print(
+                f'[ERROR] File size verification failed on attempt {attempt + 1} for "{url}": {str(e)}'
+            )
+        except IOError as e:
+            print(
+                f'[ERROR] File I/O error on attempt {attempt + 1} for "{url}": {str(e)}'
+            )
+        except Exception as e:
+            print(
+                f'[ERROR] Unexpected error on attempt {attempt + 1} for "{url}": {str(e)}'
+            )
+        finally:
+            if progress_bar:
+                progress_bar.close()
+                progress_bar = None
 
 
 if __name__ == "__main__":
