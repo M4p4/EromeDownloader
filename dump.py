@@ -11,6 +11,7 @@ from tqdm import tqdm
 
 USER_AGENT = "Mozilla/5.0"
 EROME_HOST = "www.erome.com"
+CHUNK_SIZE = 1024
 
 session = requests.Session()
 incomplete_downloads = []
@@ -105,7 +106,7 @@ def download(
             total_size_in_bytes = int(r.headers.get("content-length", 0))
             progress_bar = tqdm(total=total_size_in_bytes, unit="iB", unit_scale=True)
             with open(file_path, "wb") as f:
-                for chunk in r.iter_content(chunk_size=1024):
+                for chunk in r.iter_content(chunk_size=CHUNK_SIZE):
                     progress_bar.update(len(chunk))
                     f.write(chunk)
             progress_bar.close()
@@ -128,15 +129,18 @@ def download_with_incomplete_check(
     with session.get(url, headers=headers, stream=True) as r:
         if r.ok:
             total_size_in_bytes = int(r.headers.get("content-length", 0))
-            if existing_file_size != 0 and (
-                existing_file_size > total_size_in_bytes
-                or abs(total_size_in_bytes - existing_file_size) < 1024 * 10
-            ):
-                print(f'[\u2713] "{file_name}" already downloaded, skipping')
-                return
-            print(
-                f'[+] existing size "{existing_file_size}", total size "{total_size_in_bytes}"'
+            if existing_file_size != 0:
+                print(
+                f'[+] existing size "{get_file_size_format(existing_file_size)}", total size "{get_file_size_format(total_size_in_bytes)}"'
             )
+                if (
+                # leave small margin for error in case of server-side changes
+                existing_file_size > total_size_in_bytes
+                or abs(total_size_in_bytes - existing_file_size) < CHUNK_SIZE * 100
+            ):
+                    print(f'[\u2713] "{file_name}" already downloaded, skipping')
+                    return
+
 
             print(f'[+] Downloading "{url}"')
             headers["Range"] = f"bytes={existing_file_size}-"
@@ -149,7 +153,7 @@ def download_with_incomplete_check(
                         unit_scale=True,
                     )
                     with open(file_path, "ab") as f:
-                        for chunk in r.iter_content(chunk_size=1024):
+                        for chunk in r.iter_content(chunk_size=CHUNK_SIZE):
                             progress_bar.update(len(chunk))
                             f.write(chunk)
                     progress_bar.close()
@@ -165,10 +169,6 @@ def download_with_incomplete_check(
                 return None
 
         else:
-            print(f"status code: {r.status_code}")
-            if r.status_code == 416:
-                print(f'[\u2713] "{file_name}" already downloaded, skipping')
-                return
             incomplete_downloads.append(file_name)
             return None
 
@@ -183,10 +183,12 @@ def download_setup(url: str, download_path: str, album: str) -> tuple[str, str, 
     file_name, file_path = get_file_name_and_path(download_path, url)
     extracted = tldextract.extract(url)
     hostname = "{}.{}".format(extracted.domain, extracted.suffix)
+
+    # mimic browser headers
     headers = {
         "Referer": f"https://{hostname}" if album is None else album,
         "Origin": f"https://{hostname}",
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:130.0) Gecko/20100101 Firefox/130.0",
+        "User-Agent": USER_AGENT,
         "Accept": "video/webm,video/ogg,video/*;q=0.9,application/ogg;q=0.7,audio/*;q=0.6,*/*;q=0.5",
         "Cache-Control": "no-cache",
         "Sec-Fetch-Dest": "video",
@@ -212,3 +214,11 @@ if __name__ == "__main__":
     args = parser.parse_args()
     files = collect_links(args.u, args.r)
     print(f"[\u2713] Album with {files} files downloaded")
+
+def get_file_size_format(file_size: int) -> str:
+    chunk = float(CHUNK_SIZE)
+    for unit in ["B", "KB", "MB", "GB", "TB"]:
+        if file_size < chunk:
+            break
+        file_size /= chunk
+    return f"{file_size:.2f} {unit}"
