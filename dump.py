@@ -88,6 +88,13 @@ def get_files_in_dir(directory: str) -> list[str]:
         f for f in os.listdir(directory) if os.path.isfile(os.path.join(directory, f))
     ]
 
+def get_file_size_format(file_size: int) -> str:
+    chunk = float(CHUNK_SIZE)
+    for unit in ["B", "KB", "MB", "GB", "TB"]:
+        if file_size < chunk:
+            break
+        file_size /= chunk
+    return f"{file_size:.2f} {unit}"
 
 def download(
     url: str, download_path: str, album: str, existing_files: list[str]
@@ -215,10 +222,3 @@ if __name__ == "__main__":
     files = collect_links(args.u, args.r)
     print(f"[\u2713] Album with {files} files downloaded")
 
-def get_file_size_format(file_size: int) -> str:
-    chunk = float(CHUNK_SIZE)
-    for unit in ["B", "KB", "MB", "GB", "TB"]:
-        if file_size < chunk:
-            break
-        file_size /= chunk
-    return f"{file_size:.2f} {unit}"
