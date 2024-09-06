@@ -1,4 +1,4 @@
-# EromeDownloader
+# EromeDownloader V2
 
 The EromeDownloader script is a compact yet powerful tool written in Python, designed to download albums from erome.com, including videos, images, and gifs.
 
@@ -17,6 +17,10 @@ python3 dump.py -u [url]
 ```
 
 Provide the URL of the album you wish to download as the argument **[url]**.
+
+### Arguments
+- **-u, --url** : URL of the album to download. (Required)
+- **-c, --connections** : Max connections to use for downloading files. Default is 5.
 
 ### Where are the files saved?
 

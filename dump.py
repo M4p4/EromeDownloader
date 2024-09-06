@@ -1,132 +1,136 @@
 import argparse
-import os
+import asyncio
 import re
-import sys
-from urllib.parse import urlparse
-
-import requests
-import tldextract
+import aiohttp
+import aiofiles
 from bs4 import BeautifulSoup
+from urllib.parse import urlparse
 from tqdm import tqdm
+from pathlib import Path
 
-session = requests.Session()
 USER_AGENT = "Mozilla/5.0"
 HOST = "www.erome.com"
+CHUNK_SIZE = 1024
 
 
-def collect_links(album_url: str) -> int:
-    parsed_url = urlparse(album_url)
-    if parsed_url.hostname != HOST:
-        raise Exception(f"Host must be {HOST}")
-
-    r = session.get(album_url, headers={"User-Agent": USER_AGENT})
-    if r.status_code != 200:
-        raise Exception(f"HTTP error {r.status_code}")
-
-    soup = BeautifulSoup(r.content, "html.parser")
-    title = clean_title(soup.find("meta", property="og:title")["content"])
-    videos = [video_source["src"] for video_source in soup.find_all("source")]
-    images = [
-        image["data-src"] for image in soup.find_all("img", {"class": "img-back"})
-    ]
-    urls = list({*videos, *images})
-    download_path = get_final_path(title)
-    existing_files = get_files_in_dir(download_path)
-    for file_url in urls:
-        download(file_url, download_path, album_url, existing_files)
-
-    return len(urls)
-
-
-def clean_title(title: str, default_title="temp") -> str:
+def _clean_album_title(title: str, default_title="temp") -> str:
+    """Remove illegal characters from the album title"""
     illegal_chars = r'[\\/:*?"<>|]'
     title = re.sub(illegal_chars, "_", title)
     title = title.strip(". ")
     return title if title else default_title
 
 
-def get_final_path(title: str) -> str:
-    final_path = os.path.join("downloads", title)
-    if not os.path.isdir(final_path):
-        os.makedirs(final_path)
+def _get_final_download_path(album_title: str) -> Path:
+    """Create a directory with the title of the album"""
+    final_path = Path("downloads") / album_title
+    if not final_path.exists():
+        final_path.mkdir(parents=True)
     return final_path
 
 
-def get_files_in_dir(directory: str) -> list[str]:
-    return [
-        f for f in os.listdir(directory) if os.path.isfile(os.path.join(directory, f))
-    ]
+async def dump(url: str, max_connections: int):
+    """Collect album data and download the album"""
+    if urlparse(url).hostname != HOST:
+        raise ValueError(f"Host must be {HOST}")
+
+    title, urls = await _collect_album_data(url=url)
+    download_path = _get_final_download_path(album_title=title)
+
+    await _download(
+        album=url,
+        urls=urls,
+        max_connections=max_connections,
+        download_path=download_path,
+    )
 
 
-def download(
-    url: str,
-    download_path: str,
+async def _download(
     album: str,
-    existing_files: list[str],
-    max_retries: int = 3,
+    urls: list[str],
+    max_connections: int,
+    download_path: Path,
 ):
-    parsed_url = urlparse(url)
-    file_name = os.path.basename(parsed_url.path)
-    if file_name in existing_files:
-        print(f'[#] Skipping "{url}" [already downloaded]')
-        return
-
-    print(f'[+] Downloading "{url}"')
-    extracted = tldextract.extract(url)
-    hostname = "{}.{}".format(extracted.domain, extracted.suffix)
-    headers = {
-        "Referer": album,
-        "Origin": f"https://{hostname}",
-        "User-Agent": USER_AGENT,
-    }
-
-    progress_bar = None
-    for attempt in range(max_retries):
-        try:
-            with session.get(url, headers=headers, stream=True) as r:
-                r.raise_for_status()
-                total_size_in_bytes = int(r.headers.get("content-length", 0))
-                progress_bar = tqdm(
-                    total=total_size_in_bytes, unit="B", unit_scale=True
-                )
-                file_path = os.path.join(download_path, file_name)
-                with open(file_path, "wb") as f:
-                    for chunk in r.iter_content(chunk_size=8192):
-                        progress_bar.update(len(chunk))
-                        f.write(chunk)
-                progress_bar.close()
-
-                if os.path.getsize(file_path) != total_size_in_bytes:
-                    raise ValueError(
-                        "Downloaded file size does not match expected size"
-                    )
-                return
-
-        except requests.exceptions.RequestException as e:
-            print(
-                f'[ERROR] HTTP Request failed on attempt {attempt + 1} for "{url}": {str(e)}'
+    """Download the album"""
+    semaphore = asyncio.Semaphore(max_connections)
+    async with aiohttp.ClientSession(
+        headers={"Referer": album, "User-Agent": USER_AGENT}
+    ) as session:
+        tasks = [
+            _download_file(
+                session=session,
+                url=url,
+                semaphore=semaphore,
+                download_path=download_path,
             )
-        except ValueError as e:
-            print(
-                f'[ERROR] File size verification failed on attempt {attempt + 1} for "{url}": {str(e)}'
+            for url in urls
+        ]
+        await asyncio.gather(*tasks)
+
+
+async def _download_file(
+    session: aiohttp.ClientSession,
+    url: str,
+    semaphore: asyncio.Semaphore,
+    download_path: Path,
+):
+    """Download the file"""
+    async with semaphore, session.get(url) as r:
+        if r.ok:
+            file_name = Path(urlparse(url).path).name
+            total_size_in_bytes = int(r.headers.get("content-length", 0))
+            file_path = Path(download_path, file_name)
+
+            if file_path.exists():
+                existing_file_size = file_path.stat().st_size
+                if abs(existing_file_size - total_size_in_bytes) <= 50:
+                    tqdm.write(f"[#] Skipping {url} [already downloaded]")
+                    return
+
+            progress_bar = tqdm(
+                desc=f"[+] Downloading {url}",
+                total=total_size_in_bytes,
+                unit="B",
+                unit_scale=True,
+                unit_divisor=CHUNK_SIZE,
+                colour="MAGENTA",
             )
-        except IOError as e:
-            print(
-                f'[ERROR] File I/O error on attempt {attempt + 1} for "{url}": {str(e)}'
+            async with aiofiles.open(file_path, "wb") as f:
+                async for chunk in r.content.iter_chunked(CHUNK_SIZE):
+                    written_size = await f.write(chunk)
+                    progress_bar.update(written_size)
+        else:
+            tqdm.write(f"[ERROR] Failed to download {url}")
+
+
+async def _collect_album_data(url: str) -> tuple[str, list[str]]:
+    """Collect videos and images from the album"""
+    headers = {"User-Agent": USER_AGENT}
+    async with aiohttp.ClientSession(headers=headers) as session:
+        async with session.get(url) as response:
+            html_content = await response.text()
+            soup = BeautifulSoup(html_content, "html.parser")
+            album_title = _clean_album_title(
+                soup.find("meta", property="og:title")["content"]
             )
-        except Exception as e:
-            print(
-                f'[ERROR] Unexpected error on attempt {attempt + 1} for "{url}": {str(e)}'
-            )
-        finally:
-            if progress_bar:
-                progress_bar.close()
-                progress_bar = None
+            videos = [video_source["src"] for video_source in soup.find_all("source")]
+            images = [
+                image["data-src"]
+                for image in soup.find_all("img", {"class": "img-back"})
+            ]
+            album_urls = list({*videos, *images})
+            return album_title, album_urls
 
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(sys.argv[1:])
-    parser.add_argument("-u", help="url to download", type=str, required=True)
+    parser = argparse.ArgumentParser()
+    parser.add_argument("-u", "--url", help="URL to download", type=str, required=True)
+    parser.add_argument(
+        "-c",
+        "--connections",
+        help="Maximum number of simultaneous connections",
+        type=int,
+        default=5,
+    )
     args = parser.parse_args()
-    files = collect_links(args.u)
-    print(f"[\u2713] Album with {files} files downloaded")
+    asyncio.run(dump(url=args.url, max_connections=args.connections))
