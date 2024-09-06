@@ -156,8 +156,9 @@ def download_with_incomplete_check(
                     progress_bar = tqdm(
                         total=total_size_in_bytes,
                         initial=existing_file_size,
-                        unit="iB",
+                        unit="B",
                         unit_scale=True,
+                        unit_divisor=CHUNK_SIZE
                     )
                     with open(file_path, "ab") as f:
                         for chunk in r.iter_content(chunk_size=CHUNK_SIZE):
