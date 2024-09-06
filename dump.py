@@ -9,16 +9,16 @@ import tldextract
 from bs4 import BeautifulSoup
 from tqdm import tqdm
 
-session = requests.Session()
-session.headers.update({"User-Agent": "Mozilla/5.0"})
-
-incomplete_downloads = []
-
 USER_AGENT = "Mozilla/5.0"
 EROME_HOST = "www.erome.com"
 
+session = requests.Session()
+incomplete_downloads = []
 
-def collect_links(album_url: str, should_redownload_incomplete = False) -> int:
+session.headers.update({"User-Agent": USER_AGENT})
+
+
+def collect_links(album_url: str, should_redownload_incomplete=False) -> int:
     validate_url(album_url)
     soup = fetch_album_page(album_url)
     title = extract_title(soup)
@@ -28,15 +28,18 @@ def collect_links(album_url: str, should_redownload_incomplete = False) -> int:
     print(f"[*] Beginning download of album {title}")
     for file_url in urls:
         if should_redownload_incomplete:
-            download_with_incomplete_check(file_url, download_path, album_url, existing_files)
+            download_with_incomplete_check(
+                file_url, download_path, album_url, existing_files
+            )
         else:
             download(file_url, download_path, album_url, existing_files)
 
     # Retry incomplete downloads
     if incomplete_downloads:
-        return collect_links(album_url,should_redownload_incomplete=True)
+        return collect_links(album_url, should_redownload_incomplete=True)
 
     return len(urls)
+
 
 def validate_url(album_url: str) -> None:
     """Validates the album URL."""
@@ -44,18 +47,21 @@ def validate_url(album_url: str) -> None:
     if parsed_url.hostname != EROME_HOST:
         raise ValueError(f"Host must be {EROME_HOST}")
 
+
 def fetch_album_page(album_url: str) -> BeautifulSoup:
     """Fetches the album page and returns a BeautifulSoup object."""
-    response = session.get(album_url, headers={"User-Agent": USER_AGENT})
+    response = session.get(album_url)
     if response.status_code != 200:
         raise requests.HTTPError(f"HTTP error {response.status_code}")
     return BeautifulSoup(response.content, "html.parser")
 
+
 def clean_title(title: str, default_title="temp") -> str:
     illegal_chars = r'[\\/:*?"<>|]'
-    title = re.sub(illegal_chars, '_', title)
-    title = title.strip('. ')
+    title = re.sub(illegal_chars, "_", title)
+    title = title.strip(". ")
     return title if title else default_title
+
 
 def extract_title(soup: BeautifulSoup) -> str:
     return clean_title(soup.find("meta", property="og:title")["content"])
@@ -67,10 +73,14 @@ def get_final_path(title: str) -> str:
         os.makedirs(final_path)
     return final_path
 
+
 def extract_media_urls(soup: BeautifulSoup) -> list:
     videos = [video_source["src"] for video_source in soup.find_all("source")]
-    images = [image["data-src"] for image in soup.find_all("img", {"class": "img-back"})]
+    images = [
+        image["data-src"] for image in soup.find_all("img", {"class": "img-back"})
+    ]
     return list(set(videos + images))
+
 
 def get_files_in_dir(directory: str) -> list[str]:
     return [
@@ -78,16 +88,18 @@ def get_files_in_dir(directory: str) -> list[str]:
     ]
 
 
-def download(url: str, download_path: str, album: str, existing_files: list[str]) -> None:
+def download(
+    url: str, download_path: str, album: str, existing_files: list[str]
+) -> None:
     file_name, file_path, headers = download_setup(url, download_path, album)
     if file_name in existing_files:
         print(f'[#] Skipping "{url}" [already downloaded]')
         return
     print(f'[+] Downloading "{url}"')
     with session.get(
-            url,
-            headers=headers,
-            stream=True,
+        url,
+        headers=headers,
+        stream=True,
     ) as r:
         if r.ok:
             total_size_in_bytes = int(r.headers.get("content-length", 0))
@@ -103,53 +115,91 @@ def download(url: str, download_path: str, album: str, existing_files: list[str]
             return None
 
 
-def download_with_incomplete_check(url: str, download_path: str, album: str, existing_files: list[str]) -> None:
+def download_with_incomplete_check(
+    url: str, download_path: str, album: str, existing_files: list[str]
+) -> None:
     file_name, file_path, headers = download_setup(url, download_path, album)
-    print(f'[+] Downloading "{url}", and checking for incomplete downloads')
     existing_file_size = 0
     total_size_in_bytes = 0
     if file_name in existing_files:
-            existing_file_size = os.path.getsize(file_path)
-            headers["Range"] = f"bytes={existing_file_size}-"
+        existing_file_size = os.path.getsize(file_path)
 
-    with requests.get(url, headers=headers, stream=True) as r:
+    print(f'[+] Beggining check of "{url}"')
+    with session.get(url, headers=headers, stream=True) as r:
         if r.ok:
-            total_size_in_bytes = int(r.headers.get("content-length", 0)) + existing_file_size
-            if existing_file_size != 0 and total_size_in_bytes == existing_file_size:
+            total_size_in_bytes = int(r.headers.get("content-length", 0))
+            if existing_file_size != 0 and (
+                existing_file_size > total_size_in_bytes
+                or abs(total_size_in_bytes - existing_file_size) < 1024 * 10
+            ):
                 print(f'[\u2713] "{file_name}" already downloaded, skipping')
                 return
+            print(
+                f'[+] existing size "{existing_file_size}", total size "{total_size_in_bytes}"'
+            )
 
-            progress_bar = tqdm(total=total_size_in_bytes, unit="iB", unit_scale=True, initial=existing_file_size)
-            with open(file_path, "ab") as f:
-                for chunk in r.iter_content(chunk_size=1024):
-                    progress_bar.update(len(chunk))
-                    f.write(chunk)
-            progress_bar.close()
+            print(f'[+] Downloading "{url}"')
+            headers["Range"] = f"bytes={existing_file_size}-"
+            with session.get(url, headers=headers, stream=True) as r:
+                if r.ok:
+                    progress_bar = tqdm(
+                        total=total_size_in_bytes,
+                        initial=existing_file_size,
+                        unit="iB",
+                        unit_scale=True,
+                    )
+                    with open(file_path, "ab") as f:
+                        for chunk in r.iter_content(chunk_size=1024):
+                            progress_bar.update(len(chunk))
+                            f.write(chunk)
+                    progress_bar.close()
+                else:
+                    print(f"status code: {r.status_code}")
+                    incomplete_downloads.append(file_name)
+                    return None
+                if total_size_in_bytes != 0 and progress_bar.n != total_size_in_bytes:
+                    incomplete_downloads.append(file_name)
+                else:
+                    if file_name in incomplete_downloads:
+                        incomplete_downloads.remove(file_name)
+                return None
+
         else:
+            print(f"status code: {r.status_code}")
+            if r.status_code == 416:
+                print(f'[\u2713] "{file_name}" already downloaded, skipping')
+                return
             incomplete_downloads.append(file_name)
             return None
 
-    if total_size_in_bytes != 0 and progress_bar.n != total_size_in_bytes:
-        incomplete_downloads.append(file_name)
-    else:
-        if file_name in incomplete_downloads:
-            incomplete_downloads.remove(file_name)
 
-def get_file_name_and_path(download_path: str, url:str) -> tuple[str, str]:
+def get_file_name_and_path(download_path: str, url: str) -> tuple[str, str]:
     file_name = os.path.basename(urlparse(url).path)
     file_path = os.path.join(download_path, file_name)
-    return [ file_name, file_path ]
+    return [file_name, file_path]
+
 
 def download_setup(url: str, download_path: str, album: str) -> tuple[str, str, dict]:
     file_name, file_path = get_file_name_and_path(download_path, url)
     extracted = tldextract.extract(url)
     hostname = "{}.{}".format(extracted.domain, extracted.suffix)
     headers = {
-            "Referer": f"https://{hostname}" if album is None else album,
-            "Origin": f"https://{hostname}",
-            "User-Agent": "Mozila/5.0",
-        }
+        "Referer": f"https://{hostname}" if album is None else album,
+        "Origin": f"https://{hostname}",
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:130.0) Gecko/20100101 Firefox/130.0",
+        "Accept": "video/webm,video/ogg,video/*;q=0.9,application/ogg;q=0.7,audio/*;q=0.6,*/*;q=0.5",
+        "Cache-Control": "no-cache",
+        "Sec-Fetch-Dest": "video",
+        "Sec-Fetch-Mode": "no-cors",
+        "Sec-Fetch-Site": "same-site",
+        "Accept-Encoding": "identity",
+        "Priority": "u=4",
+        "Pragma": "no-cache",
+        "Connection": "keep-alive",
+        "Accept-Language": "en-US,en;q=0.5",
+    }
     return [file_name, file_path, headers]
+
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(sys.argv[1:])
