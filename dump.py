@@ -3,9 +3,10 @@ import asyncio
 import re
 import aiohttp
 import aiofiles
+from aiohttp import ClientTimeout
 from bs4 import BeautifulSoup
 from urllib.parse import urlparse
-from tqdm import tqdm
+from tqdm.asyncio import tqdm, tqdm_asyncio
 from pathlib import Path
 
 USER_AGENT = "Mozilla/5.0"
@@ -54,7 +55,8 @@ async def _download(
     """Download the album"""
     semaphore = asyncio.Semaphore(max_connections)
     async with aiohttp.ClientSession(
-        headers={"Referer": album, "User-Agent": USER_AGENT}
+        headers={"Referer": album, "User-Agent": USER_AGENT},
+        timeout=ClientTimeout(total=None),
     ) as session:
         tasks = [
             _download_file(
@@ -65,7 +67,13 @@ async def _download(
             )
             for url in urls
         ]
-        await asyncio.gather(*tasks)
+        await tqdm_asyncio.gather(
+            *tasks,
+            colour="MAGENTA",
+            desc="Album Progress",
+            unit="file",
+            leave=True,
+        )
 
 
 async def _download_file(
@@ -75,32 +83,35 @@ async def _download_file(
     download_path: Path,
 ):
     """Download the file"""
-    async with semaphore, session.get(url) as r:
-        if r.ok:
-            file_name = Path(urlparse(url).path).name
-            total_size_in_bytes = int(r.headers.get("content-length", 0))
-            file_path = Path(download_path, file_name)
+    async with semaphore:
+        async with session.get(url) as r:
+            if r.ok:
+                file_name = Path(urlparse(url).path).name
+                total_size_in_bytes = int(r.headers.get("content-length", 0))
+                file_path = Path(download_path, file_name)
 
-            if file_path.exists():
-                existing_file_size = file_path.stat().st_size
-                if abs(existing_file_size - total_size_in_bytes) <= 50:
-                    tqdm.write(f"[#] Skipping {url} [already downloaded]")
-                    return
+                if file_path.exists():
+                    existing_file_size = file_path.stat().st_size
+                    if abs(existing_file_size - total_size_in_bytes) <= 50:
+                        tqdm.write(f"[#] Skipping {url} [already downloaded]")
+                        return
 
-            progress_bar = tqdm(
-                desc=f"[+] Downloading {url}",
-                total=total_size_in_bytes,
-                unit="B",
-                unit_scale=True,
-                unit_divisor=CHUNK_SIZE,
-                colour="MAGENTA",
-            )
-            async with aiofiles.open(file_path, "wb") as f:
-                async for chunk in r.content.iter_chunked(CHUNK_SIZE):
-                    written_size = await f.write(chunk)
-                    progress_bar.update(written_size)
-        else:
-            tqdm.write(f"[ERROR] Failed to download {url}")
+                progress_bar = tqdm(
+                    desc=f"[+] Downloading {url}",
+                    total=total_size_in_bytes,
+                    unit="B",
+                    unit_scale=True,
+                    unit_divisor=CHUNK_SIZE,
+                    colour="MAGENTA",
+                    leave=False,
+                )
+                async with aiofiles.open(file_path, "wb") as f:
+                    async for chunk in r.content.iter_chunked(CHUNK_SIZE):
+                        written_size = await f.write(chunk)
+                        progress_bar.update(written_size)
+                progress_bar.close()
+            else:
+                tqdm.write(f"[ERROR] Failed to download {url}")
 
 
 async def _collect_album_data(url: str) -> tuple[str, list[str]]:
