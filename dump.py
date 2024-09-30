@@ -30,12 +30,14 @@ def _get_final_download_path(album_title: str) -> Path:
     return final_path
 
 
-async def dump(url: str, max_connections: int):
+async def dump(url: str, max_connections: int, skip_videos: bool, skip_images: bool):
     """Collect album data and download the album"""
     if urlparse(url).hostname != HOST:
         raise ValueError(f"Host must be {HOST}")
 
-    title, urls = await _collect_album_data(url=url)
+    title, urls = await _collect_album_data(
+        url=url, skip_videos=skip_videos, skip_images=skip_images
+    )
     download_path = _get_final_download_path(album_title=title)
 
     await _download(
@@ -114,7 +116,9 @@ async def _download_file(
                 tqdm.write(f"[ERROR] Failed to download {url}")
 
 
-async def _collect_album_data(url: str) -> tuple[str, list[str]]:
+async def _collect_album_data(
+    url: str, skip_videos: bool, skip_images: bool
+) -> tuple[str, list[str]]:
     """Collect videos and images from the album"""
     headers = {"User-Agent": USER_AGENT}
     async with aiohttp.ClientSession(headers=headers) as session:
@@ -124,11 +128,19 @@ async def _collect_album_data(url: str) -> tuple[str, list[str]]:
             album_title = _clean_album_title(
                 soup.find("meta", property="og:title")["content"]
             )
-            videos = [video_source["src"] for video_source in soup.find_all("source")]
-            images = [
-                image["data-src"]
-                for image in soup.find_all("img", {"class": "img-back"})
-            ]
+            videos = (
+                [video_source["src"] for video_source in soup.find_all("source")]
+                if not skip_videos
+                else []
+            )
+            images = (
+                [
+                    image["data-src"]
+                    for image in soup.find_all("img", {"class": "img-back"})
+                ]
+                if not skip_images
+                else []
+            )
             album_urls = list({*videos, *images})
             return album_title, album_urls
 
@@ -143,5 +155,24 @@ if __name__ == "__main__":
         type=int,
         default=5,
     )
+    parser.add_argument(
+        "-sv",
+        "--skip-videos",
+        action=argparse.BooleanOptionalAction,
+        help="Skip downloading videos",
+    )
+    parser.add_argument(
+        "-si",
+        "--skip-images",
+        action=argparse.BooleanOptionalAction,
+        help="Skip downloading images",
+    )
     args = parser.parse_args()
-    asyncio.run(dump(url=args.url, max_connections=args.connections))
+    asyncio.run(
+        dump(
+            url=args.url,
+            max_connections=args.connections,
+            skip_videos=args.skip_videos,
+            skip_images=args.skip_images,
+        )
+    )
