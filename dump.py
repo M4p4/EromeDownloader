@@ -5,7 +5,7 @@ import aiohttp
 import aiofiles
 from aiohttp import ClientTimeout
 from bs4 import BeautifulSoup
-from urllib.parse import urlparse
+from urllib.parse import urlparse, urljoin
 from tqdm.asyncio import tqdm, tqdm_asyncio
 from pathlib import Path
 
@@ -22,30 +22,63 @@ def _clean_album_title(title: str, default_title="temp") -> str:
     return title if title else default_title
 
 
-def _get_final_download_path(album_title: str) -> Path:
-    """Create a directory with the title of the album"""
-    final_path = Path("downloads") / album_title
+def _get_final_download_path(channel_name: str, album_title: str) -> Path:
+    """Create a directory with the channel and album names"""
+    final_path = Path("downloads") / channel_name / album_title
     if not final_path.exists():
         final_path.mkdir(parents=True)
     return final_path
 
 
 async def dump(url: str, max_connections: int, skip_videos: bool, skip_images: bool):
-    """Collect album data and download the album"""
-    if urlparse(url).hostname != HOST:
+    """Determine if the URL is an album or a channel and process accordingly"""
+    parsed_url = urlparse(url)
+    if parsed_url.hostname != HOST:
         raise ValueError(f"Host must be {HOST}")
 
-    title, urls = await _collect_album_data(
-        url=url, skip_videos=skip_videos, skip_images=skip_images
-    )
-    download_path = _get_final_download_path(album_title=title)
+    path_parts = parsed_url.path.strip('/').split('/')
+    if '/a/' in parsed_url.path:
+        # It's an album
+        channel_name = "_default"
+        if len(path_parts) > 2 and path_parts[-2] == 'a':
+            channel_name = path_parts[0]
+        
+        title, urls = await _collect_album_data(
+            url=url, skip_videos=skip_videos, skip_images=skip_images
+        )
+        download_path = _get_final_download_path(channel_name=channel_name, album_title=title)
 
-    await _download(
-        album=url,
-        urls=urls,
-        max_connections=max_connections,
-        download_path=download_path,
-    )
+        await _download(
+            album=url,
+            urls=urls,
+            max_connections=max_connections,
+            download_path=download_path,
+        )
+    else:
+        # It's a channel
+        channel_name = path_parts[0] if len(path_parts) > 0 else "_default"
+        download_base_path = Path("downloads") / channel_name
+        if not download_base_path.exists():
+            download_base_path.mkdir(parents=True)
+
+        album_urls = await _collect_all_channel_albums(channel_url=url)
+        if not album_urls:
+            print(f"No albums found in channel: {url}")
+            return
+
+        for album_url in album_urls:
+            title, urls = await _collect_album_data(
+                url=album_url, skip_videos=skip_videos, skip_images=skip_images
+            )
+            download_path = _get_final_download_path(channel_name=channel_name, album_title=title)
+
+            await _download(
+                album=album_url,
+                urls=urls,
+                max_connections=max_connections,
+                download_path=download_path,
+            )
+   
 
 
 async def _download(
@@ -72,7 +105,7 @@ async def _download(
         await tqdm_asyncio.gather(
             *tasks,
             colour="MAGENTA",
-            desc="Album Progress",
+            desc=f"Downloading Album: {download_path.name}",
             unit="file",
             leave=True,
         )
@@ -99,7 +132,7 @@ async def _download_file(
                         return
 
                 progress_bar = tqdm(
-                    desc=f"[+] Downloading {url}",
+                    desc=f"[+] Downloading {file_name}",
                     total=total_size_in_bytes,
                     unit="B",
                     unit_scale=True,
@@ -123,13 +156,16 @@ async def _collect_album_data(
     headers = {"User-Agent": USER_AGENT}
     async with aiohttp.ClientSession(headers=headers) as session:
         async with session.get(url) as response:
+            if response.status != 200:
+                raise ValueError(f"Failed to access {url} with status {response.status}")
             html_content = await response.text()
             soup = BeautifulSoup(html_content, "html.parser")
-            album_title = _clean_album_title(
-                soup.find("meta", property="og:title")["content"]
-            )
+            title_tag = soup.find("meta", property="og:title")
+            if not title_tag or not title_tag.get("content"):
+                raise ValueError("Could not find album title.")
+            album_title = _clean_album_title(title_tag["content"])
             videos = (
-                [video_source["src"] for video_source in soup.find_all("source")]
+                [video_source["src"] for video_source in soup.find_all("source") if video_source.get("src")]
                 if not skip_videos
                 else []
             )
@@ -137,12 +173,58 @@ async def _collect_album_data(
                 [
                     image["data-src"]
                     for image in soup.find_all("img", {"class": "img-back"})
+                    if image.get("data-src")
                 ]
                 if not skip_images
                 else []
             )
             album_urls = list({*videos, *images})
             return album_title, album_urls
+
+
+async def _collect_channel_albums(url: str) -> list[str]:
+    """Extract all album URLs from a single channel page"""
+    headers = {"User-Agent": USER_AGENT}
+    async with aiohttp.ClientSession(headers=headers) as session:
+        async with session.get(url) as response:
+            if response.status != 200:
+                raise ValueError(f"Failed to access channel {url} with status {response.status}")
+            html_content = await response.text()
+            soup = BeautifulSoup(html_content, "html.parser")
+            album_elements = soup.find_all("a", href=re.compile(r"/a/[A-Za-z0-9]+"))
+            album_urls = [
+                urljoin(f"https://{HOST}", a_tag["href"]) for a_tag in album_elements if a_tag.get("href")
+            ]
+            # Remove duplicates
+            unique_album_urls = list(set(album_urls))
+            return unique_album_urls
+
+
+async def _collect_all_channel_albums(channel_url: str) -> list[str]:
+    """Collect all album URLs from all pages of a channel"""
+    page = 1
+    all_album_urls = []
+    channel_name = urlparse(channel_url).path.strip('/')
+    
+    while True:
+        if page == 1:
+            url = channel_url
+        else:
+            url = f"{channel_url}?page={page}"
+            
+        album_urls = await _collect_channel_albums(url=url)
+        if not album_urls:
+            break
+            
+        print(f"Fetching {len(album_urls)} albums from {channel_name} on Page {page}")
+        all_album_urls.extend(album_urls)
+        page += 1
+        await asyncio.sleep(1)  # Optional: Add delay to be respectful to the server
+    
+    total_albums = len(all_album_urls)
+    print(f"\nFound {total_albums} unique albums in total")
+    print("Starting downloads...\n")
+    return all_album_urls
 
 
 if __name__ == "__main__":
