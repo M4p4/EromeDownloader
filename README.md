@@ -19,11 +19,15 @@ python3 dump.py -u [url]
 Provide the URL of the album you wish to download as the argument **[url]**.
 
 ### Arguments
-- **-u, --url** : URL of the album to download. (Required)
+- **-u, --url** : URL of the album or channel to download. (Required)
 - **-c, --connections** : Max connections to use for downloading files. Default is 5.
 - **-sv, --skip-videos** : Skip downloading videos.
 - **-si, --skip-images** : Skip downloading images.
 
 ### Where are the files saved?
 
-The files will be saved in a folder named "downloads" and within that, a folder with the album name will be created and all files from that album will be saved there.
+The files will be saved in a folder named "downloads" with the following structure:
+- For channel downloads: `downloads/<channel_name>/<album_name>/`
+- For direct album downloads: `downloads/channel/<album_name>/`
+
+All files from each album will be saved in their respective album folder.
