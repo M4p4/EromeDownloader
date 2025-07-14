@@ -13,7 +13,7 @@ pip3 install -r requirements.txt
 Next, run the script by using the command:
 
 ```
-python3 dump.py -u [url]
+python3 dump.py -u [url]https://cz.erome.com/a/e7srHc2n
 ```
 
 Provide the URL of the album you wish to download as the argument **[url]**.
