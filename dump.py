@@ -175,9 +175,46 @@ async def _collect_album_data(
             return album_title, album_urls
 
 
+def _read_urls_from_file(path: str) -> list[str]:
+    """Read album URLs from a text file, skipping blanks and '#' comments."""
+    urls = []
+    with open(path, "r", encoding="utf-8") as f:
+        for line in f:
+            line = line.strip()
+            if not line or line.startswith("#"):
+                continue
+            urls.append(line)
+    return urls
+
+
+async def _run(urls: list[str], args: argparse.Namespace):
+    """Download a batch of albums sequentially, continuing past per-album errors."""
+    for i, url in enumerate(urls, 1):
+        print(f"\n[=] Album {i}/{len(urls)}: {url}")
+        try:
+            await dump(
+                url=url,
+                max_connections=args.connections,
+                skip_videos=args.skip_videos,
+                skip_images=args.skip_images,
+                retries=args.retries,
+            )
+        except Exception as e:
+            print(f"[ERROR] Album failed: {url} ({e}); continuing.")
+
+
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
-    parser.add_argument("-u", "--url", help="URL to download", type=str, required=True)
+    source = parser.add_mutually_exclusive_group(required=True)
+    source.add_argument(
+        "-u", "--url", help="URL of a single album to download", type=str
+    )
+    source.add_argument(
+        "-f",
+        "--file",
+        help="Path to a text file with one album URL per line (blank lines and lines starting with '#' are ignored)",
+        type=str,
+    )
     parser.add_argument(
         "-c",
         "--connections",
@@ -205,12 +242,5 @@ if __name__ == "__main__":
         default=3,
     )
     args = parser.parse_args()
-    asyncio.run(
-        dump(
-            url=args.url,
-            max_connections=args.connections,
-            skip_videos=args.skip_videos,
-            skip_images=args.skip_images,
-            retries=args.retries,
-        )
-    )
+    urls = [args.url] if args.url else _read_urls_from_file(args.file)
+    asyncio.run(_run(urls, args))
