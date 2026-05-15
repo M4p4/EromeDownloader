@@ -1,7 +1,7 @@
 # EromeDownloader V3
 
 A compact yet powerful Python script for downloading albums from
-[erome.com](https://www.erome.com), including videos, images, and gifs.
+erome.com, including videos, images, and gifs.
 
 ## Features
 
