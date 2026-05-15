@@ -23,7 +23,9 @@ Provide the URL of the album you wish to download as the argument **[url]**.
 - **-c, --connections** : Max connections to use for downloading files. Default is 5.
 - **-sv, --skip-videos** : Skip downloading videos.
 - **-si, --skip-images** : Skip downloading images.
+- **-r, --retries** : Number of retry attempts per file on failure. Default is 3.
 
 ### Where are the files saved?
 
-The files will be saved in a folder named "downloads" and within that, a folder with the album name will be created and all files from that album will be saved there.
+The files will be saved in a folder named "downloads" and within that, a folder with the album 
+name will be created and all files from that album will be saved there.

@@ -12,6 +12,7 @@ from pathlib import Path
 USER_AGENT = "Mozilla/5.0"
 HOST = "www.erome.com"
 CHUNK_SIZE = 1024
+RETRY_BACKOFF_BASE = 1  # seconds; actual wait = RETRY_BACKOFF_BASE * (2 ** attempt)
 
 
 def _clean_album_title(title: str, default_title="temp") -> str:
@@ -30,7 +31,13 @@ def _get_final_download_path(album_title: str) -> Path:
     return final_path
 
 
-async def dump(url: str, max_connections: int, skip_videos: bool, skip_images: bool):
+async def dump(
+    url: str,
+    max_connections: int,
+    skip_videos: bool,
+    skip_images: bool,
+    retries: int,
+):
     """Collect album data and download the album"""
     if urlparse(url).hostname != HOST:
         raise ValueError(f"Host must be {HOST}")
@@ -45,6 +52,7 @@ async def dump(url: str, max_connections: int, skip_videos: bool, skip_images: b
         urls=urls,
         max_connections=max_connections,
         download_path=download_path,
+        retries=retries,
     )
 
 
@@ -53,6 +61,7 @@ async def _download(
     urls: list[str],
     max_connections: int,
     download_path: Path,
+    retries: int,
 ):
     """Download the album"""
     semaphore = asyncio.Semaphore(max_connections)
@@ -66,6 +75,7 @@ async def _download(
                 url=url,
                 semaphore=semaphore,
                 download_path=download_path,
+                retries=retries,
             )
             for url in urls
         ]
@@ -83,37 +93,60 @@ async def _download_file(
     url: str,
     semaphore: asyncio.Semaphore,
     download_path: Path,
+    retries: int,
 ):
-    """Download the file"""
+    """Download the file with retry-on-failure and exponential backoff."""
     async with semaphore:
-        async with session.get(url) as r:
-            if r.ok:
-                file_name = Path(urlparse(url).path).name
-                total_size_in_bytes = int(r.headers.get("content-length", 0))
-                file_path = Path(download_path, file_name)
+        for attempt in range(retries + 1):
+            try:
+                async with session.get(url) as r:
+                    if not r.ok:
+                        raise aiohttp.ClientResponseError(
+                            r.request_info,
+                            r.history,
+                            status=r.status,
+                            message=r.reason or "",
+                            headers=r.headers,
+                        )
 
-                if file_path.exists():
-                    existing_file_size = file_path.stat().st_size
-                    if abs(existing_file_size - total_size_in_bytes) <= 50:
-                        tqdm.write(f"[#] Skipping {url} [already downloaded]")
-                        return
+                    file_name = Path(urlparse(url).path).name
+                    total_size_in_bytes = int(r.headers.get("content-length", 0))
+                    file_path = Path(download_path, file_name)
 
-                progress_bar = tqdm(
-                    desc=f"[+] Downloading {url}",
-                    total=total_size_in_bytes,
-                    unit="B",
-                    unit_scale=True,
-                    unit_divisor=CHUNK_SIZE,
-                    colour="MAGENTA",
-                    leave=False,
-                )
-                async with aiofiles.open(file_path, "wb") as f:
-                    async for chunk in r.content.iter_chunked(CHUNK_SIZE):
-                        written_size = await f.write(chunk)
-                        progress_bar.update(written_size)
-                progress_bar.close()
-            else:
-                tqdm.write(f"[ERROR] Failed to download {url}")
+                    if file_path.exists():
+                        existing_file_size = file_path.stat().st_size
+                        if abs(existing_file_size - total_size_in_bytes) <= 50:
+                            tqdm.write(f"[#] Skipping {url} [already downloaded]")
+                            return
+
+                    progress_bar = tqdm(
+                        desc=f"[+] Downloading {url}",
+                        total=total_size_in_bytes,
+                        unit="B",
+                        unit_scale=True,
+                        unit_divisor=CHUNK_SIZE,
+                        colour="MAGENTA",
+                        leave=False,
+                    )
+                    try:
+                        async with aiofiles.open(file_path, "wb") as f:
+                            async for chunk in r.content.iter_chunked(CHUNK_SIZE):
+                                written_size = await f.write(chunk)
+                                progress_bar.update(written_size)
+                    finally:
+                        progress_bar.close()
+                    return
+            except (aiohttp.ClientError, asyncio.TimeoutError, OSError) as e:
+                if attempt < retries:
+                    wait = RETRY_BACKOFF_BASE * (2 ** attempt)
+                    tqdm.write(
+                        f"[!] Retry {attempt + 1}/{retries} for {url} in {wait}s ({e})"
+                    )
+                    await asyncio.sleep(wait)
+                else:
+                    tqdm.write(
+                        f"[ERROR] Failed to download {url} after {retries} retries: {e}"
+                    )
 
 
 async def _collect_album_data(
@@ -164,6 +197,13 @@ if __name__ == "__main__":
         action=argparse.BooleanOptionalAction,
         help="Skip downloading images",
     )
+    parser.add_argument(
+        "-r",
+        "--retries",
+        help="Number of retry attempts per file on failure",
+        type=int,
+        default=3,
+    )
     args = parser.parse_args()
     asyncio.run(
         dump(
@@ -171,5 +211,6 @@ if __name__ == "__main__":
             max_connections=args.connections,
             skip_videos=args.skip_videos,
             skip_images=args.skip_images,
+            retries=args.retries,
         )
     )
