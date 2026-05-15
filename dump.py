@@ -134,10 +134,7 @@ async def _collect_album_data(
                 else []
             )
             images = (
-                [
-                    image["data-src"]
-                    for image in soup.find_all("img", {"class": "img-back"})
-                ]
+                [image["data-src"] for image in soup.find_all("div", {"class": "img"})]
                 if not skip_images
                 else []
             )
