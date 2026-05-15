@@ -243,9 +243,7 @@ async def _download_file(
                                 stats["skipped"] += 1
                                 return
 
-                        file_progress.update(
-                            task_id, total=total_size_in_bytes or None
-                        )
+                        file_progress.update(task_id, total=total_size_in_bytes or None)
                         file_progress.start_task(task_id)
 
                         async with aiofiles.open(file_path, "wb") as f:
@@ -296,7 +294,12 @@ async def _collect_album_data(
                 else []
             )
             images = (
-                [image["data-src"] for image in soup.find_all("div", {"class": "img"})]
+                [
+                    image["data-src"]
+                    for image in soup.find_all(
+                        "div", {"class": "img", "data-src": True}
+                    )
+                ]
                 if not skip_images
                 else []
             )
@@ -359,7 +362,9 @@ async def _run(urls: list[str], args: argparse.Namespace) -> None:
         table.add_row(
             "Files downloaded", f"[bold green]{overall['downloaded']}[/bold green]"
         )
-        table.add_row("Files skipped", f"[bold yellow]{overall['skipped']}[/bold yellow]")
+        table.add_row(
+            "Files skipped", f"[bold yellow]{overall['skipped']}[/bold yellow]"
+        )
         table.add_row("Files failed", f"[bold red]{overall['failed']}[/bold red]")
         table.add_row("Files total", f"[bold cyan]{overall['total']}[/bold cyan]")
         border = "green" if albums_failed == 0 and overall["failed"] == 0 else "red"
