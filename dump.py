@@ -378,7 +378,8 @@ async def _run(urls: list[str], args: argparse.Namespace) -> None:
         )
 
 
-if __name__ == "__main__":
+def main() -> None:
+    """CLI entry point for the ``eromedump`` command."""
     parser = argparse.ArgumentParser()
     source = parser.add_mutually_exclusive_group(required=True)
     source.add_argument(
@@ -422,3 +423,7 @@ if __name__ == "__main__":
         asyncio.run(_run(urls, args))
     except KeyboardInterrupt:
         console.print("\n[yellow]Interrupted by user.[/yellow]")
+
+
+if __name__ == "__main__":
+    main()

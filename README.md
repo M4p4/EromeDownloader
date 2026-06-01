@@ -1,7 +1,12 @@
 # EromeDownloader V3
 
+![tests](https://github.com/<owner>/EromeDownloader/actions/workflows/tests.yml/badge.svg)
+
 A compact yet powerful Python script for downloading albums from
 erome.com, including videos, images, and gifs.
+
+> Replace `<owner>` in the badge URL above with your GitHub username (or org)
+> after you push to your repository.
 
 ## Features
 
@@ -49,6 +54,25 @@ pip install -r requirements.txt
 ```
 
 When you are done, deactivate the virtual environment with `deactivate`.
+
+### Install as a command (optional)
+
+You can install the project so it exposes an `eromedump` command, letting you
+run it from anywhere without typing `python dump.py`:
+
+```bash
+pip install -e .
+```
+
+After this, both invocation styles work identically:
+
+```bash
+eromedump -u https://www.erome.com/a/xxxxxxxx
+python dump.py -u https://www.erome.com/a/xxxxxxxx
+```
+
+The `eromedump` command is available while the virtual environment it was
+installed into is active.
 
 ## Usage
 
@@ -124,3 +148,19 @@ downloads/
     ├── image1.jpg
     └── image2.jpg
 ```
+
+## Running tests
+
+Install the development dependencies (which include the runtime ones) and run
+the suite with [pytest](https://docs.pytest.org/):
+
+```bash
+pip install -r requirements-dev.txt
+pytest
+```
+
+The tests cover the title/path helpers, the URL-list file reader, album HTML
+parsing, and the download logic (success, skipping already-downloaded files,
+retries, and failure handling) using mocked HTTP responses, so no network
+access is required. The same suite runs automatically on every push and pull
+request via GitHub Actions (see `.github/workflows/tests.yml`).

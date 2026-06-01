@@ -1,0 +1,22 @@
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "eromedownloader"
+version = "3.0.0"
+description = "Fast concurrent album downloader for erome.com"
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = [
+    "aiofiles",
+    "aiohttp",
+    "beautifulsoup4",
+    "rich",
+]
+
+[tool.setuptools]
+py-modules = ["dump"]
+
+[project.scripts]
+eromedump = "dump:main"
