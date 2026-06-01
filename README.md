@@ -1,12 +1,9 @@
 # EromeDownloader V3
 
-![tests](https://github.com/<owner>/EromeDownloader/actions/workflows/tests.yml/badge.svg)
+![tests](https://github.com/M4p4/EromeDownloader/actions/workflows/tests.yml/badge.svg)
 
 A compact yet powerful Python script for downloading albums from
 erome.com, including videos, images, and gifs.
-
-> Replace `<owner>` in the badge URL above with your GitHub username (or org)
-> after you push to your repository.
 
 ## Features
 
@@ -26,7 +23,7 @@ erome.com, including videos, images, and gifs.
 Clone the repository and move into it:
 
 ```bash
-git clone https://github.com/<your-fork>/EromeDownloader.git
+git clone https://github.com/M4p4/EromeDownloader.git
 cd EromeDownloader
 ```
 
