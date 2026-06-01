@@ -155,9 +155,3 @@ the suite with [pytest](https://docs.pytest.org/):
 pip install -r requirements-dev.txt
 pytest
 ```
-
-The tests cover the title/path helpers, the URL-list file reader, album HTML
-parsing, and the download logic (success, skipping already-downloaded files,
-retries, and failure handling) using mocked HTTP responses, so no network
-access is required. The same suite runs automatically on every push and pull
-request via GitHub Actions (see `.github/workflows/tests.yml`).
